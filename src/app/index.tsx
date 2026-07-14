@@ -1,96 +1,150 @@
-import React, { useState, useEffect } from 'react';
-import { SafeAreaView, Button, Text, FlatList, StyleSheet, TouchableOpacity, View } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  SafeAreaView,
+  Button,
+  Text,
+  FlatList,
+  StyleSheet,
+  TouchableOpacity,
+  View,
+  ActivityIndicator,
+} from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as IntentLauncher from 'expo-intent-launcher';
 
-const STORAGE_KEY = 'saved_folder_uri';
+const ROOT_PATH = 'file:///storage/emulated/0/';
 
-type FileEntry = { name: string; uri: string; isDirectory: boolean };
+// Skip the whole Android folder — Android/data is private/junk, and Android/media
+// (WhatsApp, Telegram cache) is mostly stickers/thumbnails that also can't be opened
+// via our current file-sharing method anyway. Real user documents live outside this tree.
+const SKIP_PATH_PATTERNS = ['/Android', '/.thumbnails', '/.trash', '/LOST.DIR'];
+
+function shouldSkipPath(fullPath: string): boolean {
+  return SKIP_PATH_PATTERNS.some((pattern) => fullPath.includes(pattern));
+}
+
+type FileEntry = { name: string; uri: string; category: string };
+
+const CATEGORIES: { key: string; label: string; exts: string[] }[] = [
+  { key: 'pdf', label: 'PDF', exts: ['pdf'] },
+  { key: 'word', label: 'Word', exts: ['doc', 'docx'] },
+  { key: 'excel', label: 'Excel', exts: ['xls', 'xlsx'] },
+  { key: 'ppt', label: 'PowerPoint', exts: ['ppt', 'pptx'] },
+  { key: 'txt', label: 'Text', exts: ['txt'] },
+  { key: 'zip', label: 'Compressed', exts: ['zip', 'rar', '7z'] },
+  { key: 'image', label: 'Images', exts: ['jpg', 'jpeg', 'png', 'gif', 'webp'] },
+  { key: 'video', label: 'Videos', exts: ['mp4', 'mkv', 'mov', 'avi'] },
+];
+
+function getCategory(name: string): string {
+  const ext = name.split('.').pop()?.toLowerCase() || '';
+  for (const cat of CATEGORIES) {
+    if (cat.exts.includes(ext)) return cat.key;
+  }
+  return 'other';
+}
 
 export default function Index() {
-  const [files, setFiles] = useState<FileEntry[]>([]);
-  const [status, setStatus] = useState('Loading...');
-  const [rootUri, setRootUri] = useState<string | null>(null);
-  const [currentUri, setCurrentUri] = useState<string | null>(null);
-  const [history, setHistory] = useState<string[]>([]);
+  const [hasAccess, setHasAccess] = useState<boolean | null>(null); // null = checking
+  const [scanning, setScanning] = useState(false);
+  const [allFiles, setAllFiles] = useState<FileEntry[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [status, setStatus] = useState('');
 
-  useEffect(() => {
-    (async () => {
-      const uri = await AsyncStorage.getItem(STORAGE_KEY);
-      if (uri) {
-        setRootUri(uri);
-        setCurrentUri(uri);
-        readFolder(uri);
-      } else {
-        setStatus('No folder selected yet');
-      }
-    })();
+  const checkAccess = useCallback(async () => {
+    try {
+      await FileSystem.readDirectoryAsync(ROOT_PATH);
+      setHasAccess(true);
+    } catch {
+      setHasAccess(false);
+    }
   }, []);
 
-  const readFolder = async (uri: string) => {
+  useEffect(() => {
+    checkAccess();
+  }, [checkAccess]);
+
+  const requestAccess = async () => {
     try {
-      setStatus('Reading folder...');
-      const uris = await FileSystem.StorageAccessFramework.readDirectoryAsync(uri);
-
-      const entries: FileEntry[] = uris.map((u: string) => {
-        const name = decodeURIComponent(u.split('/').pop() || u);
-        // Heuristic for icon only — real check happens on tap
-        const looksLikeFile = /\.[a-zA-Z0-9]{1,5}$/.test(name);
-        return { name, uri: u, isDirectory: !looksLikeFile };
-      });
-
-      entries.sort((a, b) => {
-        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
-        return a.name.localeCompare(b.name);
-      });
-
-      setFiles(entries);
-      setStatus(`Found ${entries.length} items`);
-    } catch (err: any) {
-      setStatus(`Access lost, please re-select folder (${err.message})`);
-      await AsyncStorage.removeItem(STORAGE_KEY);
-      setRootUri(null);
-      setCurrentUri(null);
+      await IntentLauncher.startActivityAsync(
+        'android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION',
+        { data: 'package:com.umarj1.docreaderstoragepoc' } // matches app.json android.package
+      );
+    } catch {
+      // Fallback to the general settings page if the app-specific one fails
+      await IntentLauncher.startActivityAsync('android.settings.MANAGE_ALL_FILES_ACCESS_PERMISSION');
     }
   };
 
-  const pickFolder = async () => {
-    try {
-      setStatus('Requesting folder access...');
-      const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+  const runScan = async () => {
+    setScanning(true);
+    setStatus('Detecting storage volumes...');
+    const results: FileEntry[] = [];
+    let skippedCount = 0;
 
-      if (!permissions.granted) {
-        setStatus('Permission denied');
+    // Discover all mounted storage volumes (internal + any SD card)
+    const roots: string[] = ['file:///storage/emulated/0/'];
+    try {
+      const volumes = await FileSystem.readDirectoryAsync('file:///storage/');
+      for (const vol of volumes) {
+        if (vol === 'emulated' || vol === 'self') continue;
+        roots.push(`file:///storage/${vol}/`);
+      }
+    } catch {
+      // If /storage/ itself isn't listable, we just proceed with internal only
+    }
+
+    setStatus(`Scanning ${roots.length} storage location(s)...`);
+
+    let processedCount = 0;
+
+    const scanFolderTracked = async (path: string, depth: number) => {
+      if (depth > 14) return;
+      let items: string[];
+      try {
+        items = await FileSystem.readDirectoryAsync(path);
+      } catch {
+        skippedCount++;
         return;
       }
+      for (const item of items) {
+        const fullPath = path.endsWith('/') ? `${path}${item}` : `${path}/${item}`;
+        if (shouldSkipPath(fullPath)) continue;
 
-      await AsyncStorage.setItem(STORAGE_KEY, permissions.directoryUri);
-      setRootUri(permissions.directoryUri);
-      setCurrentUri(permissions.directoryUri);
-      setHistory([]);
-      readFolder(permissions.directoryUri);
-    } catch (err: any) {
-      setStatus(`Error: ${err.message}`);
+        processedCount++;
+        if (processedCount % 40 === 0) {
+          setStatus(`Scanning... ${processedCount} items processed so far`);
+        }
+
+        // Fast path: has a normal extension -> treat as file immediately, no extra check
+        const hasExtension = /\.[a-zA-Z0-9]{1,5}$/.test(item);
+        if (hasExtension) {
+          results.push({ name: item, uri: fullPath, category: getCategory(item) });
+          continue;
+        }
+
+        // Ambiguous (no extension) -> actually test if it's a folder
+        try {
+          await FileSystem.readDirectoryAsync(fullPath);
+          await scanFolderTracked(fullPath, depth + 1);
+        } catch {
+          // Not a folder either -> it's an extensionless file, still count it
+          results.push({ name: item, uri: fullPath, category: 'other' });
+        }
+      }
+    };
+
+    for (const root of roots) {
+      await scanFolderTracked(root, 0);
     }
-  };
 
-  const changeFolder = async () => {
-    await AsyncStorage.removeItem(STORAGE_KEY);
-    setRootUri(null);
-    setCurrentUri(null);
-    setHistory([]);
-    setFiles([]);
-    setStatus('No folder selected yet');
-  };
-
-  const goBack = () => {
-    if (history.length === 0) return;
-    const prevHistory = [...history];
-    const prevUri = prevHistory.pop()!;
-    setHistory(prevHistory);
-    setCurrentUri(prevUri);
-    readFolder(prevUri);
+    setAllFiles(results);
+    const categorized = results.filter((f) => f.category !== 'other').length;
+    const other = results.length - categorized;
+    setStatus(
+      `Scan complete — ${results.length} files (${other} uncategorized) — ${skippedCount} folders skipped (permission)`
+    );
+    setScanning(false);
   };
 
   const getMimeType = (name: string) => {
@@ -108,70 +162,89 @@ export default function Index() {
       case 'jpg':
       case 'jpeg': return 'image/jpeg';
       case 'png': return 'image/png';
+      case 'mp4': return 'video/mp4';
       default: return '*/*';
     }
   };
 
   const openFile = async (file: FileEntry) => {
     try {
-      const mimeType = getMimeType(file.name);
+      const contentUri = await FileSystem.getContentUriAsync(file.uri);
       await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
-        data: file.uri,
+        data: contentUri,
         flags: 1,
-        type: mimeType,
+        type: getMimeType(file.name),
       });
     } catch (err: any) {
       setStatus(`Could not open file: ${err.message}`);
     }
   };
 
-  const handlePress = async (entry: FileEntry) => {
-    // Try treating it as a folder first — this is the reliable way to tell with SAF
-    try {
-      const testRead = await FileSystem.StorageAccessFramework.readDirectoryAsync(entry.uri);
-      // If we got here without throwing, it IS a folder
-      setHistory((prev) => [...prev, currentUri!]);
-      setCurrentUri(entry.uri);
-      const sorted = [...testRead];
-      const mapped: FileEntry[] = sorted.map((u: string) => {
-        const name = decodeURIComponent(u.split('/').pop() || u);
-        const looksLikeFile = /\.[a-zA-Z0-9]{1,5}$/.test(name);
-        return { name, uri: u, isDirectory: !looksLikeFile };
-      });
-      mapped.sort((a, b) => {
-        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
-        return a.name.localeCompare(b.name);
-      });
-      setFiles(mapped);
-      setStatus(`Found ${mapped.length} items`);
-    } catch {
-      // Not a folder — open as a file instead
-      openFile(entry);
-    }
-  };
+  // ---- RENDER: Permission gate ----
+  if (hasAccess === null) {
+    return (
+      <SafeAreaView style={styles.center}>
+        <ActivityIndicator size="large" />
+        <Text>Checking permissions...</Text>
+      </SafeAreaView>
+    );
+  }
 
+  if (hasAccess === false) {
+    return (
+      <SafeAreaView style={styles.center}>
+        <Text style={styles.status}>This app needs full file access to scan your device.</Text>
+        <Button title="Grant Access" onPress={requestAccess} />
+        <View style={{ height: 12 }} />
+        <Button title="I've granted it — check again" onPress={checkAccess} />
+      </SafeAreaView>
+    );
+  }
+
+  // ---- RENDER: Category file list ----
+  if (selectedCategory) {
+    const filtered = allFiles.filter((f) => f.category === selectedCategory);
+    return (
+      <SafeAreaView style={styles.container}>
+        <Button title="< Back to Categories" onPress={() => setSelectedCategory(null)} />
+        <Text style={styles.status}>{filtered.length} files</Text>
+        <FlatList
+          data={filtered}
+          keyExtractor={(item, i) => i.toString()}
+          renderItem={({ item }) => (
+            <TouchableOpacity onPress={() => openFile(item)}>
+              <Text style={styles.item}>📄 {item.name}</Text>
+            </TouchableOpacity>
+          )}
+        />
+      </SafeAreaView>
+    );
+  }
+
+  // ---- RENDER: Home category grid ----
   return (
     <SafeAreaView style={styles.container}>
-      {!rootUri ? (
-        <Button title="Pick a Folder and List Files" onPress={pickFolder} />
+      <Text style={styles.title}>Document Reader</Text>
+      {allFiles.length === 0 ? (
+        <Button title={scanning ? 'Scanning...' : 'Scan Device'} onPress={runScan} disabled={scanning} />
       ) : (
-        <View style={styles.topRow}>
-          <Button title="Change Folder" onPress={changeFolder} />
-          {history.length > 0 && <Button title="< Back" onPress={goBack} />}
-        </View>
+        <Button title="Re-scan Device" onPress={runScan} disabled={scanning} />
       )}
+      {scanning && <ActivityIndicator size="large" style={{ marginTop: 20 }} />}
       <Text style={styles.status}>{status}</Text>
       <FlatList
-        data={files}
-        keyExtractor={(item, index) => index.toString()}
-        renderItem={({ item }) => (
-          <TouchableOpacity onPress={() => handlePress(item)}>
-            <Text style={styles.item}>
-              {item.isDirectory ? '📁 ' : '📄 '}
-              {item.name}
-            </Text>
-          </TouchableOpacity>
-        )}
+        data={CATEGORIES}
+        keyExtractor={(item) => item.key}
+        numColumns={2}
+        renderItem={({ item }) => {
+          const count = allFiles.filter((f) => f.category === item.key).length;
+          return (
+            <TouchableOpacity style={styles.categoryBox} onPress={() => setSelectedCategory(item.key)}>
+              <Text style={styles.categoryLabel}>{item.label}</Text>
+              <Text style={styles.categoryCount}>{count}</Text>
+            </TouchableOpacity>
+          );
+        }}
       />
     </SafeAreaView>
   );
@@ -179,7 +252,18 @@ export default function Index() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: 50, paddingHorizontal: 16, backgroundColor: '#FFFFFF' },
-  topRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 10 },
-  status: { marginVertical: 10, fontWeight: 'bold', color: '#000000' },
-  item: { paddingVertical: 6, fontSize: 14, color: '#000000' },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20, backgroundColor: '#FFFFFF' },
+  title: { fontSize: 22, fontWeight: 'bold', marginBottom: 12, color: '#000' },
+  status: { marginVertical: 10, fontWeight: 'bold', color: '#000', textAlign: 'center' },
+  item: { paddingVertical: 6, fontSize: 14, color: '#000' },
+  categoryBox: {
+    flex: 1,
+    margin: 6,
+    padding: 20,
+    backgroundColor: '#F0F4FF',
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  categoryLabel: { fontSize: 15, fontWeight: '600', color: '#000' },
+  categoryCount: { fontSize: 22, fontWeight: 'bold', color: '#208AEF', marginTop: 6 },
 });
