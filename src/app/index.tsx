@@ -1,23 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { SafeAreaView, Button, Text, FlatList, StyleSheet, TouchableOpacity } from 'react-native';
+import { SafeAreaView, Button, Text, FlatList, StyleSheet, TouchableOpacity, View } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as IntentLauncher from 'expo-intent-launcher';
 
 const STORAGE_KEY = 'saved_folder_uri';
 
-type FileEntry = { name: string; uri: string };
+type FileEntry = { name: string; uri: string; isDirectory: boolean };
 
 export default function Index() {
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [status, setStatus] = useState('Loading...');
-  const [savedUri, setSavedUri] = useState<string | null>(null);
+  const [rootUri, setRootUri] = useState<string | null>(null);
+  const [currentUri, setCurrentUri] = useState<string | null>(null);
+  const [history, setHistory] = useState<string[]>([]);
 
   useEffect(() => {
     (async () => {
       const uri = await AsyncStorage.getItem(STORAGE_KEY);
       if (uri) {
-        setSavedUri(uri);
+        setRootUri(uri);
+        setCurrentUri(uri);
         readFolder(uri);
       } else {
         setStatus('No folder selected yet');
@@ -29,16 +32,26 @@ export default function Index() {
     try {
       setStatus('Reading folder...');
       const uris = await FileSystem.StorageAccessFramework.readDirectoryAsync(uri);
-      const entries: FileEntry[] = uris.map((u: string) => ({
-        name: decodeURIComponent(u.split('/').pop() || u),
-        uri: u,
-      }));
+
+      const entries: FileEntry[] = uris.map((u: string) => {
+        const name = decodeURIComponent(u.split('/').pop() || u);
+        // Heuristic for icon only — real check happens on tap
+        const looksLikeFile = /\.[a-zA-Z0-9]{1,5}$/.test(name);
+        return { name, uri: u, isDirectory: !looksLikeFile };
+      });
+
+      entries.sort((a, b) => {
+        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+
       setFiles(entries);
       setStatus(`Found ${entries.length} items`);
     } catch (err: any) {
       setStatus(`Access lost, please re-select folder (${err.message})`);
       await AsyncStorage.removeItem(STORAGE_KEY);
-      setSavedUri(null);
+      setRootUri(null);
+      setCurrentUri(null);
     }
   };
 
@@ -53,7 +66,9 @@ export default function Index() {
       }
 
       await AsyncStorage.setItem(STORAGE_KEY, permissions.directoryUri);
-      setSavedUri(permissions.directoryUri);
+      setRootUri(permissions.directoryUri);
+      setCurrentUri(permissions.directoryUri);
+      setHistory([]);
       readFolder(permissions.directoryUri);
     } catch (err: any) {
       setStatus(`Error: ${err.message}`);
@@ -62,9 +77,20 @@ export default function Index() {
 
   const changeFolder = async () => {
     await AsyncStorage.removeItem(STORAGE_KEY);
-    setSavedUri(null);
+    setRootUri(null);
+    setCurrentUri(null);
+    setHistory([]);
     setFiles([]);
     setStatus('No folder selected yet');
+  };
+
+  const goBack = () => {
+    if (history.length === 0) return;
+    const prevHistory = [...history];
+    const prevUri = prevHistory.pop()!;
+    setHistory(prevHistory);
+    setCurrentUri(prevUri);
+    readFolder(prevUri);
   };
 
   const getMimeType = (name: string) => {
@@ -91,7 +117,7 @@ export default function Index() {
       const mimeType = getMimeType(file.name);
       await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
         data: file.uri,
-        flags: 1, // FLAG_GRANT_READ_URI_PERMISSION
+        flags: 1,
         type: mimeType,
       });
     } catch (err: any) {
@@ -99,20 +125,51 @@ export default function Index() {
     }
   };
 
+  const handlePress = async (entry: FileEntry) => {
+    // Try treating it as a folder first — this is the reliable way to tell with SAF
+    try {
+      const testRead = await FileSystem.StorageAccessFramework.readDirectoryAsync(entry.uri);
+      // If we got here without throwing, it IS a folder
+      setHistory((prev) => [...prev, currentUri!]);
+      setCurrentUri(entry.uri);
+      const sorted = [...testRead];
+      const mapped: FileEntry[] = sorted.map((u: string) => {
+        const name = decodeURIComponent(u.split('/').pop() || u);
+        const looksLikeFile = /\.[a-zA-Z0-9]{1,5}$/.test(name);
+        return { name, uri: u, isDirectory: !looksLikeFile };
+      });
+      mapped.sort((a, b) => {
+        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+      setFiles(mapped);
+      setStatus(`Found ${mapped.length} items`);
+    } catch {
+      // Not a folder — open as a file instead
+      openFile(entry);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
-      {!savedUri ? (
+      {!rootUri ? (
         <Button title="Pick a Folder and List Files" onPress={pickFolder} />
       ) : (
-        <Button title="Change Folder" onPress={changeFolder} />
+        <View style={styles.topRow}>
+          <Button title="Change Folder" onPress={changeFolder} />
+          {history.length > 0 && <Button title="< Back" onPress={goBack} />}
+        </View>
       )}
       <Text style={styles.status}>{status}</Text>
       <FlatList
         data={files}
         keyExtractor={(item, index) => index.toString()}
         renderItem={({ item }) => (
-          <TouchableOpacity onPress={() => openFile(item)}>
-            <Text style={styles.item}>{item.name}</Text>
+          <TouchableOpacity onPress={() => handlePress(item)}>
+            <Text style={styles.item}>
+              {item.isDirectory ? '📁 ' : '📄 '}
+              {item.name}
+            </Text>
           </TouchableOpacity>
         )}
       />
@@ -122,6 +179,7 @@ export default function Index() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: 50, paddingHorizontal: 16, backgroundColor: '#FFFFFF' },
+  topRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 10 },
   status: { marginVertical: 10, fontWeight: 'bold', color: '#000000' },
-  item: { paddingVertical: 4, fontSize: 13, color: '#000000' },
+  item: { paddingVertical: 6, fontSize: 14, color: '#000000' },
 });
