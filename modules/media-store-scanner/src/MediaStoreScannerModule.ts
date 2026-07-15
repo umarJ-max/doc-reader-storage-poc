@@ -11,6 +11,7 @@ export type MediaStoreFile = {
 type MediaStoreScannerModuleType = {
   hasFullAccess(): boolean;
   saveToDownloads(fileName: string, base64Content: string, mimeType: string): Promise<string>;
+  convertPdfToImages(pdfPath: string, outputPrefix: string): Promise<string[]>;
   queryAllFiles(): Promise<MediaStoreFile[]>;
 };
 

@@ -2,12 +2,17 @@ package expo.modules.mediastorescanner
 
 import android.content.ContentUris
 import android.content.ContentValues
+import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.pdf.PdfRenderer
 import android.os.Build
 import android.os.Environment
+import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
 import android.util.Base64
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import java.io.File
 
 class MediaStoreScannerModule : Module() {
   override fun definition() = ModuleDefinition {
@@ -42,6 +47,49 @@ class MediaStoreScannerModule : Module() {
       } ?: throw Exception("Failed to open output stream")
 
       itemUri.toString()
+    }
+
+    AsyncFunction("convertPdfToImages") { pdfPath: String, outputPrefix: String ->
+      val context = appContext.reactContext ?: throw Exception("No context available")
+      val resolver = context.contentResolver
+      val results = mutableListOf<String>()
+
+      val file = File(pdfPath)
+      val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+      val renderer = PdfRenderer(pfd)
+
+      try {
+        for (i in 0 until renderer.pageCount) {
+          val page = renderer.openPage(i)
+          val scale = 2
+          val bitmap = Bitmap.createBitmap(page.width * scale, page.height * scale, Bitmap.Config.ARGB_8888)
+          bitmap.eraseColor(Color.WHITE)
+          page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+          page.close()
+
+          val fileName = "${outputPrefix}_page${i + 1}.png"
+          val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+            put(MediaStore.Downloads.MIME_TYPE, "image/png")
+            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+          }
+
+          val itemUri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            ?: throw Exception("Failed to create image entry for page ${i + 1}")
+
+          resolver.openOutputStream(itemUri)?.use { stream ->
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+          } ?: throw Exception("Failed to open output stream for page ${i + 1}")
+
+          bitmap.recycle()
+          results.add(itemUri.toString())
+        }
+      } finally {
+        renderer.close()
+        pfd.close()
+      }
+
+      results
     }
 
     AsyncFunction("queryAllFiles") {

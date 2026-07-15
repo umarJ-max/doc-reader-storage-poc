@@ -12,9 +12,8 @@ import {
 } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as IntentLauncher from 'expo-intent-launcher';
-import { PDFDocument } from 'pdf-lib';
-import * as base64js from 'base64-js';
-import MediaStoreScanner from '../../modules/media-store-scanner/src/MediaStoreScannerModule';
+import { router } from 'expo-router';
+import MediaStoreScanner from '../../../modules/media-store-scanner/src/MediaStoreScannerModule';
 
 const ROOT_PATH = 'file:///storage/emulated/0/';
 const APP_PACKAGE = 'com.umarj1.docreaderstoragepoc';
@@ -49,7 +48,7 @@ const CATEGORIES: { key: string; label: string; exts: string[] }[] = [
   { key: 'ppt', label: 'PowerPoint', exts: ['ppt', 'pptx'] },
   { key: 'txt', label: 'Text', exts: ['txt'] },
   { key: 'zip', label: 'Compressed', exts: ['zip', 'rar', '7z'] },
-  { key: 'image', label: 'Images', exts: ['jpg', 'jpeg', 'png', 'gif', 'webp'] },
+  { key: 'image', label: 'Images', exts: ['jpg', 'jpeg', 'png', 'gif'] },
   { key: 'video', label: 'Videos', exts: ['mp4', 'mkv', 'mov', 'avi'] },
 ];
 
@@ -67,8 +66,6 @@ export default function Index() {
   const [allFiles, setAllFiles] = useState<FileEntry[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [status, setStatus] = useState('');
-  const [selectedForMerge, setSelectedForMerge] = useState<Set<string>>(new Set());
-  const [merging, setMerging] = useState(false);
 
   const checkAccess = useCallback(() => {
     try {
@@ -126,57 +123,6 @@ export default function Index() {
     setScanning(false);
   };
 
-  const toggleMergeSelection = (uri: string) => {
-    setSelectedForMerge((prev) => {
-      const next = new Set(prev);
-      if (next.has(uri)) next.delete(uri);
-      else next.add(uri);
-      return next;
-    });
-  };
-
-  const mergePdfs = async () => {
-    const filesToMerge = allFiles.filter((f) => selectedForMerge.has(f.uri));
-    if (filesToMerge.length < 2) {
-      setStatus('Select at least 2 PDFs to merge');
-      return;
-    }
-
-    setMerging(true);
-    setStatus(`Merging ${filesToMerge.length} PDFs...`);
-
-    try {
-      const mergedPdf = await PDFDocument.create();
-
-      for (const file of filesToMerge) {
-        const base64 = await FileSystem.readAsStringAsync(`file://${file.path}`, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        const bytes = base64js.toByteArray(base64);
-        const sourcePdf = await PDFDocument.load(bytes);
-        const copiedPages = await mergedPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
-        copiedPages.forEach((page) => mergedPdf.addPage(page));
-      }
-
-      const mergedBase64 = await mergedPdf.saveAsBase64();
-      const outputName = `Merged_${Date.now()}.pdf`;
-
-      const savedUri = await MediaStoreScanner.saveToDownloads(outputName, mergedBase64, 'application/pdf');
-
-      setStatus(`Saved to Downloads — ${outputName}`);
-      setSelectedForMerge(new Set());
-
-      // savedUri is already a proper content:// URI from MediaStore, directly openable
-      await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
-        data: savedUri,
-        flags: 1,
-        type: 'application/pdf',
-      });
-    } catch (err: any) {
-      setStatus(`Merge failed: ${err.message}`);
-    }
-    setMerging(false);
-  };
 
   const getMimeType = (name: string) => {
     const ext = name.split('.').pop()?.toLowerCase();
@@ -231,47 +177,23 @@ export default function Index() {
     );
   }
 
-  // ---- RENDER: Category file list ----
+  // ---- RENDER: Category file list (pure browsing - tap to open, nothing else) ----
   if (selectedCategory) {
     const filtered = allFiles.filter((f) => f.category === selectedCategory);
-    const isPdfCategory = selectedCategory === 'pdf';
 
     return (
       <SafeAreaView style={styles.container}>
-        <Button
-          title="< Back to Categories"
-          onPress={() => {
-            setSelectedCategory(null);
-            setSelectedForMerge(new Set());
-          }}
-        />
+        <Button title="< Back to Categories" onPress={() => setSelectedCategory(null)} />
         <Text style={styles.status}>{filtered.length} files</Text>
 
-        {isPdfCategory && selectedForMerge.size >= 2 && (
-          <Button
-            title={merging ? 'Merging...' : `Merge ${selectedForMerge.size} Selected PDFs`}
-            onPress={mergePdfs}
-            disabled={merging}
-          />
-        )}
-        {merging && <ActivityIndicator size="large" style={{ marginTop: 10 }} />}
-
         <FlatList
-          key="pdf-file-list"
+          key="file-list"
           data={filtered}
-          extraData={selectedForMerge}
           keyExtractor={(item, i) => i.toString()}
           renderItem={({ item }) => (
-            <View style={styles.fileRow}>
-              {isPdfCategory && (
-                <TouchableOpacity onPress={() => toggleMergeSelection(item.uri)} style={styles.checkbox}>
-                  <Text style={styles.checkboxText}>{selectedForMerge.has(item.uri) ? '☑' : '☐'}</Text>
-                </TouchableOpacity>
-              )}
-              <TouchableOpacity style={{ flex: 1 }} onPress={() => openFile(item)}>
-                <Text style={styles.item}>📄 {item.name}</Text>
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity onPress={() => openFile(item)}>
+              <Text style={styles.item}>📄 {item.name}</Text>
+            </TouchableOpacity>
           )}
         />
       </SafeAreaView>
@@ -303,6 +225,24 @@ export default function Index() {
             </TouchableOpacity>
           );
         }}
+        ListFooterComponent={
+          <View>
+            <Text style={styles.sectionTitle}>Tools</Text>
+            <View style={styles.toolsRow}>
+              <TouchableOpacity style={styles.toolBox} onPress={() => router.push('/merge-pdf' as any)}>
+                <Text style={styles.toolLabel}>Merge PDF</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.toolBox} onPress={() => router.push('/images-to-pdf' as any)}>
+                <Text style={styles.toolLabel}>Images to PDF</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.toolsRow}>
+              <TouchableOpacity style={styles.toolBox} onPress={() => router.push('/pdf-to-image' as any)}>
+                <Text style={styles.toolLabel}>PDF to Image</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        }
       />
     </SafeAreaView>
   );
@@ -327,4 +267,14 @@ const styles = StyleSheet.create({
   },
   categoryLabel: { fontSize: 15, fontWeight: '600', color: '#000' },
   categoryCount: { fontSize: 22, fontWeight: 'bold', color: '#208AEF', marginTop: 6 },
+  sectionTitle: { fontSize: 18, fontWeight: 'bold', marginTop: 16, marginBottom: 8, color: '#000' },
+  toolsRow: { flexDirection: 'row', gap: 12, marginBottom: 20 },
+  toolBox: {
+    flex: 1,
+    padding: 16,
+    backgroundColor: '#FFF3E0',
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  toolLabel: { fontSize: 14, fontWeight: '600', color: '#000' },
 });
