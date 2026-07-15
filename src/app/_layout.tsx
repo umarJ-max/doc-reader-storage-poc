@@ -16,6 +16,8 @@ export default function RootLayout() {
         <Stack.Screen name="merge-pdf" />
         <Stack.Screen name="images-to-pdf" />
         <Stack.Screen name="pdf-to-image" />
+        <Stack.Screen name="watermark-pdf" />
+        <Stack.Screen name="split-pdf" />
       </Stack>
     </ThemeProvider>
   );

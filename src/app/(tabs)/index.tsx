@@ -13,6 +13,7 @@ import {
 import * as FileSystem from 'expo-file-system/legacy';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { router } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import MediaStoreScanner from '../../../modules/media-store-scanner/src/MediaStoreScannerModule';
 
 const ROOT_PATH = 'file:///storage/emulated/0/';
@@ -66,6 +67,29 @@ export default function Index() {
   const [allFiles, setAllFiles] = useState<FileEntry[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [status, setStatus] = useState('');
+  const [recentFiles, setRecentFiles] = useState<(FileEntry & { openedAt: number })[]>([]);
+
+  const RECENT_KEY = 'recent_files_v1';
+
+  const loadRecent = useCallback(async () => {
+    try {
+      const raw = await AsyncStorage.getItem(RECENT_KEY);
+      if (raw) setRecentFiles(JSON.parse(raw));
+    } catch {
+      // ignore, just start with empty recent list
+    }
+  }, []);
+
+  const addToRecent = async (file: FileEntry) => {
+    try {
+      const existing = recentFiles.filter((f) => f.uri !== file.uri);
+      const updated = [{ ...file, openedAt: Date.now() }, ...existing].slice(0, 15);
+      setRecentFiles(updated);
+      await AsyncStorage.setItem(RECENT_KEY, JSON.stringify(updated));
+    } catch {
+      // non-critical, don't block file opening if this fails
+    }
+  };
 
   const checkAccess = useCallback(() => {
     try {
@@ -78,6 +102,7 @@ export default function Index() {
 
   useEffect(() => {
     checkAccess();
+    loadRecent();
     // Re-check whenever the app comes back to the foreground (e.g. returning from Settings)
     const subscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
@@ -151,6 +176,7 @@ export default function Index() {
         flags: 1,
         type: getMimeType(file.name),
       });
+      addToRecent(file);
     } catch (err: any) {
       setStatus(`Could not open file: ${err.message}`);
     }
@@ -179,7 +205,9 @@ export default function Index() {
 
   // ---- RENDER: Category file list (pure browsing - tap to open, nothing else) ----
   if (selectedCategory) {
-    const filtered = allFiles.filter((f) => f.category === selectedCategory);
+    const filtered = selectedCategory === 'recent'
+      ? recentFiles
+      : allFiles.filter((f) => f.category === selectedCategory);
 
     return (
       <SafeAreaView style={styles.container}>
@@ -213,11 +241,12 @@ export default function Index() {
       <Text style={styles.status}>{status}</Text>
       <FlatList
         key="category-grid"
-        data={CATEGORIES}
+        data={[{ key: 'recent', label: 'Recent Files', exts: [] }, ...CATEGORIES]}
         keyExtractor={(item) => item.key}
         numColumns={2}
+        extraData={[allFiles, recentFiles]}
         renderItem={({ item }) => {
-          const count = allFiles.filter((f) => f.category === item.key).length;
+          const count = item.key === 'recent' ? recentFiles.length : allFiles.filter((f) => f.category === item.key).length;
           return (
             <TouchableOpacity style={styles.categoryBox} onPress={() => setSelectedCategory(item.key)}>
               <Text style={styles.categoryLabel}>{item.label}</Text>
@@ -225,6 +254,7 @@ export default function Index() {
             </TouchableOpacity>
           );
         }}
+        ListHeaderComponent={<Text style={styles.sectionTitle}>Discover Your Files</Text>}
         ListFooterComponent={
           <View>
             <Text style={styles.sectionTitle}>Tools</Text>
@@ -239,6 +269,14 @@ export default function Index() {
             <View style={styles.toolsRow}>
               <TouchableOpacity style={styles.toolBox} onPress={() => router.push('/pdf-to-image' as any)}>
                 <Text style={styles.toolLabel}>PDF to Image</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.toolBox} onPress={() => router.push('/watermark-pdf' as any)}>
+                <Text style={styles.toolLabel}>Watermark PDF</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.toolsRow}>
+              <TouchableOpacity style={styles.toolBox} onPress={() => router.push('/split-pdf' as any)}>
+                <Text style={styles.toolLabel}>Split PDF</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -268,6 +306,8 @@ const styles = StyleSheet.create({
   categoryLabel: { fontSize: 15, fontWeight: '600', color: '#000' },
   categoryCount: { fontSize: 22, fontWeight: 'bold', color: '#208AEF', marginTop: 6 },
   sectionTitle: { fontSize: 18, fontWeight: 'bold', marginTop: 16, marginBottom: 8, color: '#000' },
+  recentRow: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#EEE' },
+  recentItem: { fontSize: 14, color: '#000' },
   toolsRow: { flexDirection: 'row', gap: 12, marginBottom: 20 },
   toolBox: {
     flex: 1,
