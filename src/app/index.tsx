@@ -8,12 +8,16 @@ import {
   TouchableOpacity,
   View,
   ActivityIndicator,
+  AppState,
 } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as IntentLauncher from 'expo-intent-launcher';
+import { PDFDocument } from 'pdf-lib';
+import * as base64js from 'base64-js';
 import MediaStoreScanner from '../../modules/media-store-scanner/src/MediaStoreScannerModule';
 
 const ROOT_PATH = 'file:///storage/emulated/0/';
+const APP_PACKAGE = 'com.umarj1.docreaderstoragepoc';
 
 // Always-block: genuinely private/system, never useful
 const HARD_SKIP = ['/Android/data', '/Android/obb', '/.thumbnails', '/.trash', '/LOST.DIR'];
@@ -36,7 +40,7 @@ function shouldSkipPath(fullPath: string): boolean {
   return false;
 }
 
-type FileEntry = { name: string; uri: string; category: string };
+type FileEntry = { name: string; uri: string; path: string; category: string };
 
 const CATEGORIES: { key: string; label: string; exts: string[] }[] = [
   { key: 'pdf', label: 'PDF', exts: ['pdf'] },
@@ -63,11 +67,13 @@ export default function Index() {
   const [allFiles, setAllFiles] = useState<FileEntry[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [status, setStatus] = useState('');
+  const [selectedForMerge, setSelectedForMerge] = useState<Set<string>>(new Set());
+  const [merging, setMerging] = useState(false);
 
-  const checkAccess = useCallback(async () => {
+  const checkAccess = useCallback(() => {
     try {
-      await FileSystem.readDirectoryAsync(ROOT_PATH);
-      setHasAccess(true);
+      const granted = MediaStoreScanner.hasFullAccess();
+      setHasAccess(granted);
     } catch {
       setHasAccess(false);
     }
@@ -75,6 +81,13 @@ export default function Index() {
 
   useEffect(() => {
     checkAccess();
+    // Re-check whenever the app comes back to the foreground (e.g. returning from Settings)
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        checkAccess();
+      }
+    });
+    return () => subscription.remove();
   }, [checkAccess]);
 
   const requestAccess = async () => {
@@ -99,6 +112,7 @@ export default function Index() {
         .map((f) => ({
           name: f.name,
           uri: f.uri, // content:// URI, already directly openable — no FileProvider conversion needed
+          path: f.path, // raw filesystem path, needed for reading (content:// can't be read directly)
           category: getCategory(f.name),
         }));
 
@@ -110,6 +124,58 @@ export default function Index() {
       setStatus(`Native scan failed: ${err.message}`);
     }
     setScanning(false);
+  };
+
+  const toggleMergeSelection = (uri: string) => {
+    setSelectedForMerge((prev) => {
+      const next = new Set(prev);
+      if (next.has(uri)) next.delete(uri);
+      else next.add(uri);
+      return next;
+    });
+  };
+
+  const mergePdfs = async () => {
+    const filesToMerge = allFiles.filter((f) => selectedForMerge.has(f.uri));
+    if (filesToMerge.length < 2) {
+      setStatus('Select at least 2 PDFs to merge');
+      return;
+    }
+
+    setMerging(true);
+    setStatus(`Merging ${filesToMerge.length} PDFs...`);
+
+    try {
+      const mergedPdf = await PDFDocument.create();
+
+      for (const file of filesToMerge) {
+        const base64 = await FileSystem.readAsStringAsync(`file://${file.path}`, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        const bytes = base64js.toByteArray(base64);
+        const sourcePdf = await PDFDocument.load(bytes);
+        const copiedPages = await mergedPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
+        copiedPages.forEach((page) => mergedPdf.addPage(page));
+      }
+
+      const mergedBase64 = await mergedPdf.saveAsBase64();
+      const outputName = `Merged_${Date.now()}.pdf`;
+
+      const savedUri = await MediaStoreScanner.saveToDownloads(outputName, mergedBase64, 'application/pdf');
+
+      setStatus(`Saved to Downloads — ${outputName}`);
+      setSelectedForMerge(new Set());
+
+      // savedUri is already a proper content:// URI from MediaStore, directly openable
+      await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+        data: savedUri,
+        flags: 1,
+        type: 'application/pdf',
+      });
+    } catch (err: any) {
+      setStatus(`Merge failed: ${err.message}`);
+    }
+    setMerging(false);
   };
 
   const getMimeType = (name: string) => {
@@ -168,17 +234,44 @@ export default function Index() {
   // ---- RENDER: Category file list ----
   if (selectedCategory) {
     const filtered = allFiles.filter((f) => f.category === selectedCategory);
+    const isPdfCategory = selectedCategory === 'pdf';
+
     return (
       <SafeAreaView style={styles.container}>
-        <Button title="< Back to Categories" onPress={() => setSelectedCategory(null)} />
+        <Button
+          title="< Back to Categories"
+          onPress={() => {
+            setSelectedCategory(null);
+            setSelectedForMerge(new Set());
+          }}
+        />
         <Text style={styles.status}>{filtered.length} files</Text>
+
+        {isPdfCategory && selectedForMerge.size >= 2 && (
+          <Button
+            title={merging ? 'Merging...' : `Merge ${selectedForMerge.size} Selected PDFs`}
+            onPress={mergePdfs}
+            disabled={merging}
+          />
+        )}
+        {merging && <ActivityIndicator size="large" style={{ marginTop: 10 }} />}
+
         <FlatList
+          key="pdf-file-list"
           data={filtered}
+          extraData={selectedForMerge}
           keyExtractor={(item, i) => i.toString()}
           renderItem={({ item }) => (
-            <TouchableOpacity onPress={() => openFile(item)}>
-              <Text style={styles.item}>📄 {item.name}</Text>
-            </TouchableOpacity>
+            <View style={styles.fileRow}>
+              {isPdfCategory && (
+                <TouchableOpacity onPress={() => toggleMergeSelection(item.uri)} style={styles.checkbox}>
+                  <Text style={styles.checkboxText}>{selectedForMerge.has(item.uri) ? '☑' : '☐'}</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity style={{ flex: 1 }} onPress={() => openFile(item)}>
+                <Text style={styles.item}>📄 {item.name}</Text>
+              </TouchableOpacity>
+            </View>
           )}
         />
       </SafeAreaView>
@@ -197,6 +290,7 @@ export default function Index() {
       {scanning && <ActivityIndicator size="large" style={{ marginTop: 20 }} />}
       <Text style={styles.status}>{status}</Text>
       <FlatList
+        key="category-grid"
         data={CATEGORIES}
         keyExtractor={(item) => item.key}
         numColumns={2}
@@ -220,6 +314,9 @@ const styles = StyleSheet.create({
   title: { fontSize: 22, fontWeight: 'bold', marginBottom: 12, color: '#000' },
   status: { marginVertical: 10, fontWeight: 'bold', color: '#000', textAlign: 'center' },
   item: { paddingVertical: 6, fontSize: 14, color: '#000' },
+  fileRow: { flexDirection: 'row', alignItems: 'center' },
+  checkbox: { paddingHorizontal: 10, paddingVertical: 6 },
+  checkboxText: { fontSize: 20 },
   categoryBox: {
     flex: 1,
     margin: 6,
