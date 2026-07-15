@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android", "web"],
+  "apple": {
+    "modules": ["MediaStoreScannerModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.mediastorescanner.MediaStoreScannerModule"]
+  }
+}

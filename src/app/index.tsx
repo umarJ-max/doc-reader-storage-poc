@@ -11,16 +11,29 @@ import {
 } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as IntentLauncher from 'expo-intent-launcher';
+import MediaStoreScanner from '../../modules/media-store-scanner/src/MediaStoreScannerModule';
 
 const ROOT_PATH = 'file:///storage/emulated/0/';
 
-// Skip the whole Android folder — Android/data is private/junk, and Android/media
-// (WhatsApp, Telegram cache) is mostly stickers/thumbnails that also can't be opened
-// via our current file-sharing method anyway. Real user documents live outside this tree.
-const SKIP_PATH_PATTERNS = ['/Android', '/.thumbnails', '/.trash', '/LOST.DIR'];
+// Always-block: genuinely private/system, never useful
+const HARD_SKIP = ['/Android/data', '/Android/obb', '/.thumbnails', '/.trash', '/LOST.DIR'];
+
+// Known junk inside Android/media (stickers, statuses, cached sent/received media previews)
+const JUNK_MEDIA_KEYWORDS = [
+  'sticker', 'status', 'wallpaper', 'profile photo', 'voice note',
+  'sent images', 'sent video', 'received images', 'received video',
+  '.shared', '.trashed', 'sent/images', 'sent/video', 'received/images', 'received/video',
+];
 
 function shouldSkipPath(fullPath: string): boolean {
-  return SKIP_PATH_PATTERNS.some((pattern) => fullPath.includes(pattern));
+  if (HARD_SKIP.some((p) => fullPath.includes(p))) return true;
+
+  const lower = fullPath.toLowerCase();
+  if (lower.includes('/android/media/')) {
+    // Inside Android/media specifically — block known junk, but let real "Documents" folders through
+    if (JUNK_MEDIA_KEYWORDS.some((k) => lower.includes(k))) return true;
+  }
+  return false;
 }
 
 type FileEntry = { name: string; uri: string; category: string };
@@ -78,72 +91,24 @@ export default function Index() {
 
   const runScan = async () => {
     setScanning(true);
-    setStatus('Detecting storage volumes...');
-    const results: FileEntry[] = [];
-    let skippedCount = 0;
-
-    // Discover all mounted storage volumes (internal + any SD card)
-    const roots: string[] = ['file:///storage/emulated/0/'];
+    setStatus('Querying MediaStore (native)...');
     try {
-      const volumes = await FileSystem.readDirectoryAsync('file:///storage/');
-      for (const vol of volumes) {
-        if (vol === 'emulated' || vol === 'self') continue;
-        roots.push(`file:///storage/${vol}/`);
-      }
-    } catch {
-      // If /storage/ itself isn't listable, we just proceed with internal only
+      const nativeFiles = await MediaStoreScanner.queryAllFiles();
+      const results: FileEntry[] = nativeFiles
+        .filter((f) => f.name && f.name.length > 0)
+        .map((f) => ({
+          name: f.name,
+          uri: f.uri, // content:// URI, already directly openable — no FileProvider conversion needed
+          category: getCategory(f.name),
+        }));
+
+      setAllFiles(results);
+      const categorized = results.filter((f) => f.category !== 'other').length;
+      const other = results.length - categorized;
+      setStatus(`Scan complete (native) — ${results.length} files (${other} uncategorized)`);
+    } catch (err: any) {
+      setStatus(`Native scan failed: ${err.message}`);
     }
-
-    setStatus(`Scanning ${roots.length} storage location(s)...`);
-
-    let processedCount = 0;
-
-    const scanFolderTracked = async (path: string, depth: number) => {
-      if (depth > 14) return;
-      let items: string[];
-      try {
-        items = await FileSystem.readDirectoryAsync(path);
-      } catch {
-        skippedCount++;
-        return;
-      }
-      for (const item of items) {
-        const fullPath = path.endsWith('/') ? `${path}${item}` : `${path}/${item}`;
-        if (shouldSkipPath(fullPath)) continue;
-
-        processedCount++;
-        if (processedCount % 40 === 0) {
-          setStatus(`Scanning... ${processedCount} items processed so far`);
-        }
-
-        // Fast path: has a normal extension -> treat as file immediately, no extra check
-        const hasExtension = /\.[a-zA-Z0-9]{1,5}$/.test(item);
-        if (hasExtension) {
-          results.push({ name: item, uri: fullPath, category: getCategory(item) });
-          continue;
-        }
-
-        // Ambiguous (no extension) -> actually test if it's a folder
-        try {
-          await FileSystem.readDirectoryAsync(fullPath);
-          await scanFolderTracked(fullPath, depth + 1);
-        } catch {
-          // Not a folder either -> it's an extensionless file, still count it
-          results.push({ name: item, uri: fullPath, category: 'other' });
-        }
-      }
-    };
-
-    for (const root of roots) {
-      await scanFolderTracked(root, 0);
-    }
-
-    setAllFiles(results);
-    const categorized = results.filter((f) => f.category !== 'other').length;
-    const other = results.length - categorized;
-    setStatus(
-      `Scan complete — ${results.length} files (${other} uncategorized) — ${skippedCount} folders skipped (permission)`
-    );
     setScanning(false);
   };
 
@@ -169,9 +134,8 @@ export default function Index() {
 
   const openFile = async (file: FileEntry) => {
     try {
-      const contentUri = await FileSystem.getContentUriAsync(file.uri);
       await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
-        data: contentUri,
+        data: file.uri, // already a content:// URI from MediaStore, directly openable
         flags: 1,
         type: getMimeType(file.name),
       });
