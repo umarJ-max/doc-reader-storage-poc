@@ -8,6 +8,7 @@ import android.graphics.pdf.PdfRenderer
 import android.os.Build
 import android.os.Environment
 import android.os.ParcelFileDescriptor
+import android.os.StatFs
 import android.provider.MediaStore
 import android.util.Base64
 import expo.modules.kotlin.modules.Module
@@ -24,6 +25,49 @@ class MediaStoreScannerModule : Module() {
       } else {
         true
       }
+    }
+
+    Function("getStorageInfo") {
+      val context = appContext.reactContext ?: throw Exception("No context available")
+
+      fun statsFor(path: File): Map<String, Any> {
+        val stat = StatFs(path.path)
+        val total = stat.blockCountLong * stat.blockSizeLong
+        val free = stat.availableBlocksLong * stat.blockSizeLong
+        val used = total - free
+        return mapOf("total" to total, "used" to used, "free" to free)
+      }
+
+      var internal: Map<String, Any> = statsFor(Environment.getExternalStorageDirectory())
+      var sdCard: Map<String, Any>? = null
+
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        val storageManager = context.getSystemService(android.os.storage.StorageManager::class.java)
+        val volumes = storageManager.storageVolumes
+
+        for (volume in volumes) {
+          val dir = volume.directory ?: continue
+          try {
+            val stats = statsFor(dir)
+            if (volume.isRemovable) {
+              // Only trust it if it looks like a real, reasonably-sized volume
+              val totalBytes = stats["total"] as Long
+              if (totalBytes > 100L * 1024 * 1024) { // ignore anything under 100MB, likely a bogus mount
+                sdCard = stats
+              }
+            } else if (volume.isPrimary) {
+              internal = stats
+            }
+          } catch (e: Exception) {
+            // skip unreadable volume
+          }
+        }
+      }
+
+      mapOf(
+        "internal" to internal,
+        "sdCard" to sdCard
+      )
     }
 
     AsyncFunction("saveToDownloads") { fileName: String, base64Content: String, mimeType: String ->

@@ -53,6 +53,11 @@ const CATEGORIES: { key: string; label: string; exts: string[] }[] = [
   { key: 'video', label: 'Videos', exts: ['mp4', 'mkv', 'mov', 'avi'] },
 ];
 
+function formatBytes(bytes: number): string {
+  const gb = bytes / (1024 * 1024 * 1024);
+  return `${gb.toFixed(2)} GB`;
+}
+
 function getCategory(name: string): string {
   const ext = name.split('.').pop()?.toLowerCase() || '';
   for (const cat of CATEGORIES) {
@@ -68,6 +73,10 @@ export default function Index() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [status, setStatus] = useState('');
   const [recentFiles, setRecentFiles] = useState<(FileEntry & { openedAt: number })[]>([]);
+  const [storageInfo, setStorageInfo] = useState<{
+    internal: { total: number; used: number; free: number };
+    sdCard: { total: number; used: number; free: number } | null;
+  } | null>(null);
 
   const RECENT_KEY = 'recent_files_v1';
 
@@ -103,6 +112,12 @@ export default function Index() {
   useEffect(() => {
     checkAccess();
     loadRecent();
+    try {
+      const info = MediaStoreScanner.getStorageInfo();
+      setStorageInfo(info);
+    } catch {
+      // storage info is non-critical, fail silently
+    }
     // Re-check whenever the app comes back to the foreground (e.g. returning from Settings)
     const subscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
@@ -278,7 +293,62 @@ export default function Index() {
               <TouchableOpacity style={styles.toolBox} onPress={() => router.push('/split-pdf' as any)}>
                 <Text style={styles.toolLabel}>Split PDF</Text>
               </TouchableOpacity>
+              <TouchableOpacity style={styles.toolBox} onPress={() => router.push('/notes' as any)}>
+                <Text style={styles.toolLabel}>Create Notes</Text>
+              </TouchableOpacity>
             </View>
+            <View style={styles.toolsRow}>
+              <TouchableOpacity style={styles.toolBox} onPress={() => router.push('/scan?mode=qr' as any)}>
+                <Text style={styles.toolLabel}>Scan QR Code</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.toolBox} onPress={() => router.push('/scan?mode=barcode' as any)}>
+                <Text style={styles.toolLabel}>Scan Barcode</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.toolsRow}>
+              <TouchableOpacity style={styles.toolBox} onPress={() => router.push('/whatsapp-chat' as any)}>
+                <Text style={styles.toolLabel}>WhatsApp Direct Chat</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.toolBox} onPress={() => router.push('/settings' as any)}>
+                <Text style={styles.toolLabel}>Settings</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.sectionTitle}>File Manager</Text>
+            {storageInfo && (
+              <View>
+                <View style={styles.storageBox}>
+                  <Text style={styles.storageLabel}>Internal Storage</Text>
+                  <Text style={styles.storageValue}>
+                    {formatBytes(storageInfo.internal.used)} of {formatBytes(storageInfo.internal.total)} used
+                  </Text>
+                  <View style={styles.progressTrack}>
+                    <View
+                      style={[
+                        styles.progressFill,
+                        { width: `${Math.min(100, (storageInfo.internal.used / storageInfo.internal.total) * 100)}%` },
+                      ]}
+                    />
+                  </View>
+                </View>
+                {storageInfo.sdCard && (
+                  <View style={styles.storageBox}>
+                    <Text style={styles.storageLabel}>Memory Card</Text>
+                    <Text style={styles.storageValue}>
+                      {formatBytes(storageInfo.sdCard.used)} of {formatBytes(storageInfo.sdCard.total)} used
+                    </Text>
+                    <View style={styles.progressTrack}>
+                      <View
+                        style={[
+                          styles.progressFill,
+                          { width: `${Math.min(100, (storageInfo.sdCard.used / storageInfo.sdCard.total) * 100)}%` },
+                        ]}
+                      />
+                    </View>
+                  </View>
+                )}
+              </View>
+            )}
           </View>
         }
       />
@@ -309,6 +379,21 @@ const styles = StyleSheet.create({
   recentRow: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#EEE' },
   recentItem: { fontSize: 14, color: '#000' },
   toolsRow: { flexDirection: 'row', gap: 12, marginBottom: 20 },
+  storageBox: { backgroundColor: '#F0F4FF', borderRadius: 10, padding: 16, marginBottom: 12 },
+  storageLabel: { fontSize: 15, fontWeight: '600', color: '#000' },
+  storageValue: { fontSize: 14, color: '#555', marginTop: 4 },
+  progressTrack: {
+    height: 8,
+    backgroundColor: '#D0DCF5',
+    borderRadius: 4,
+    marginTop: 10,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: 8,
+    backgroundColor: '#208AEF',
+    borderRadius: 4,
+  },
   toolBox: {
     flex: 1,
     padding: 16,
