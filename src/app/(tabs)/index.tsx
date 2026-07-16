@@ -9,10 +9,12 @@ import {
   View,
   ActivityIndicator,
   AppState,
+  TextInput,
 } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { router } from 'expo-router';
+import ScreenHeader from '../../components/screen-header';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MediaStoreScanner from '../../../modules/media-store-scanner/src/MediaStoreScannerModule';
 
@@ -53,6 +55,12 @@ const CATEGORIES: { key: string; label: string; exts: string[] }[] = [
   { key: 'video', label: 'Videos', exts: ['mp4', 'mkv', 'mov', 'avi'] },
 ];
 
+const CATEGORY_TITLES: Record<string, string> = {
+  recent: 'Recent Files',
+  bookmarks: 'Bookmarks',
+  ...Object.fromEntries(CATEGORIES.map((c) => [c.key, c.label])),
+};
+
 function formatBytes(bytes: number): string {
   const gb = bytes / (1024 * 1024 * 1024);
   return `${gb.toFixed(2)} GB`;
@@ -73,6 +81,27 @@ export default function Index() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [status, setStatus] = useState('');
   const [recentFiles, setRecentFiles] = useState<(FileEntry & { openedAt: number })[]>([]);
+  const [bookmarkedUris, setBookmarkedUris] = useState<Set<string>>(new Set());
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const BOOKMARKS_KEY = 'bookmarked_files_v1';
+
+  const loadBookmarks = useCallback(async () => {
+    try {
+      const raw = await AsyncStorage.getItem(BOOKMARKS_KEY);
+      if (raw) setBookmarkedUris(new Set(JSON.parse(raw)));
+    } catch {
+      // start empty if load fails
+    }
+  }, []);
+
+  const toggleBookmark = async (uri: string) => {
+    const next = new Set(bookmarkedUris);
+    if (next.has(uri)) next.delete(uri);
+    else next.add(uri);
+    setBookmarkedUris(next);
+    await AsyncStorage.setItem(BOOKMARKS_KEY, JSON.stringify(Array.from(next)));
+  };
   const [storageInfo, setStorageInfo] = useState<{
     internal: { total: number; used: number; free: number };
     sdCard: { total: number; used: number; free: number } | null;
@@ -112,6 +141,7 @@ export default function Index() {
   useEffect(() => {
     checkAccess();
     loadRecent();
+    loadBookmarks();
     try {
       const info = MediaStoreScanner.getStorageInfo();
       setStorageInfo(info);
@@ -218,27 +248,76 @@ export default function Index() {
     );
   }
 
-  // ---- RENDER: Category file list (pure browsing - tap to open, nothing else) ----
+  // ---- RENDER: Category file list (tap to open, star to bookmark) ----
   if (selectedCategory) {
     const filtered = selectedCategory === 'recent'
       ? recentFiles
+      : selectedCategory === 'bookmarks'
+      ? allFiles.filter((f) => bookmarkedUris.has(f.uri))
       : allFiles.filter((f) => f.category === selectedCategory);
 
     return (
       <SafeAreaView style={styles.container}>
-        <Button title="< Back to Categories" onPress={() => setSelectedCategory(null)} />
-        <Text style={styles.status}>{filtered.length} files</Text>
+        <ScreenHeader title={CATEGORY_TITLES[selectedCategory] || 'Files'} onBack={() => setSelectedCategory(null)} />
+        <View style={styles.content}>
+          <Text style={styles.status}>{filtered.length} files</Text>
 
-        <FlatList
-          key="file-list"
-          data={filtered}
-          keyExtractor={(item, i) => i.toString()}
-          renderItem={({ item }) => (
-            <TouchableOpacity onPress={() => openFile(item)}>
-              <Text style={styles.item}>📄 {item.name}</Text>
-            </TouchableOpacity>
-          )}
-        />
+          <FlatList
+            key="file-list"
+            data={filtered}
+            extraData={bookmarkedUris}
+            keyExtractor={(item, i) => i.toString()}
+            renderItem={({ item }) => (
+              <View style={styles.fileRow}>
+                <TouchableOpacity style={{ flex: 1 }} onPress={() => openFile(item)}>
+                  <Text style={styles.item}>📄 {item.name}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => toggleBookmark(item.uri)} style={styles.bookmarkStar}>
+                  <Text style={styles.bookmarkStarText}>{bookmarkedUris.has(item.uri) ? '⭐' : '☆'}</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // ---- RENDER: Search results (overrides grid while searching) ----
+  if (searchQuery.trim().length > 0) {
+    const results = allFiles.filter((f) =>
+      f.name.toLowerCase().includes(searchQuery.trim().toLowerCase())
+    );
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.content}>
+          <Text style={styles.title}>Doc Tools</Text>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search anything..."
+            placeholderTextColor="#999"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoFocus
+          />
+          <Text style={styles.status}>{results.length} results</Text>
+          <FlatList
+            key="search-results"
+            data={results}
+            extraData={bookmarkedUris}
+            keyExtractor={(item, i) => i.toString()}
+            renderItem={({ item }) => (
+              <View style={styles.fileRow}>
+                <TouchableOpacity style={{ flex: 1 }} onPress={() => openFile(item)}>
+                  <Text style={styles.item}>📄 {item.name}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => toggleBookmark(item.uri)} style={styles.bookmarkStar}>
+                  <Text style={styles.bookmarkStarText}>{bookmarkedUris.has(item.uri) ? '⭐' : '☆'}</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          />
+        </View>
       </SafeAreaView>
     );
   }
@@ -246,31 +325,48 @@ export default function Index() {
   // ---- RENDER: Home category grid ----
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.title}>Document Reader</Text>
-      {allFiles.length === 0 ? (
-        <Button title={scanning ? 'Scanning...' : 'Scan Device'} onPress={runScan} disabled={scanning} />
-      ) : (
-        <Button title="Re-scan Device" onPress={runScan} disabled={scanning} />
-      )}
-      {scanning && <ActivityIndicator size="large" style={{ marginTop: 20 }} />}
-      <Text style={styles.status}>{status}</Text>
-      <FlatList
-        key="category-grid"
-        data={[{ key: 'recent', label: 'Recent Files', exts: [] }, ...CATEGORIES]}
-        keyExtractor={(item) => item.key}
-        numColumns={2}
-        extraData={[allFiles, recentFiles]}
-        renderItem={({ item }) => {
-          const count = item.key === 'recent' ? recentFiles.length : allFiles.filter((f) => f.category === item.key).length;
-          return (
-            <TouchableOpacity style={styles.categoryBox} onPress={() => setSelectedCategory(item.key)}>
-              <Text style={styles.categoryLabel}>{item.label}</Text>
-              <Text style={styles.categoryCount}>{count}</Text>
-            </TouchableOpacity>
-          );
-        }}
-        ListHeaderComponent={<Text style={styles.sectionTitle}>Discover Your Files</Text>}
-        ListFooterComponent={
+      <View style={styles.content}>
+        <Text style={styles.title}>Doc Tools</Text>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search anything..."
+          placeholderTextColor="#999"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+        {allFiles.length === 0 ? (
+          <Button title={scanning ? 'Scanning...' : 'Scan Device'} onPress={runScan} disabled={scanning} />
+        ) : (
+          <Button title="Re-scan Device" onPress={runScan} disabled={scanning} />
+        )}
+        {scanning && <ActivityIndicator size="large" style={{ marginTop: 20 }} />}
+        <Text style={styles.status}>{status}</Text>
+        <FlatList
+          key="category-grid"
+          data={[
+            { key: 'recent', label: 'Recent Files', exts: [] },
+            { key: 'bookmarks', label: 'Bookmarks', exts: [] },
+            ...CATEGORIES,
+          ]}
+          keyExtractor={(item) => item.key}
+          numColumns={2}
+          extraData={[allFiles, recentFiles, bookmarkedUris]}
+          renderItem={({ item }) => {
+            const count =
+              item.key === 'recent'
+                ? recentFiles.length
+                : item.key === 'bookmarks'
+                ? bookmarkedUris.size
+                : allFiles.filter((f) => f.category === item.key).length;
+            return (
+              <TouchableOpacity style={styles.categoryBox} onPress={() => setSelectedCategory(item.key)}>
+                <Text style={styles.categoryLabel}>{item.label}</Text>
+                <Text style={styles.categoryCount}>{count}</Text>
+              </TouchableOpacity>
+            );
+          }}
+          ListHeaderComponent={<Text style={styles.sectionTitle}>Discover Your Files</Text>}
+          ListFooterComponent={
           <View>
             <Text style={styles.sectionTitle}>Tools</Text>
             <View style={styles.toolsRow}>
@@ -352,17 +448,31 @@ export default function Index() {
           </View>
         }
       />
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingTop: 50, paddingHorizontal: 16, backgroundColor: '#FFFFFF' },
+  container: { flex: 1, backgroundColor: '#FFFFFF' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20, backgroundColor: '#FFFFFF' },
-  title: { fontSize: 22, fontWeight: 'bold', marginBottom: 12, color: '#000' },
+  title: { fontSize: 22, fontWeight: 'bold', marginTop: 50, marginBottom: 12, color: '#000' },
+  searchInput: {
+    borderWidth: 1,
+    borderColor: '#CCC',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 14,
+    color: '#000',
+    fontSize: 15,
+  },
   status: { marginVertical: 10, fontWeight: 'bold', color: '#000', textAlign: 'center' },
   item: { paddingVertical: 6, fontSize: 14, color: '#000' },
   fileRow: { flexDirection: 'row', alignItems: 'center' },
+  content: { flex: 1, paddingHorizontal: 16 },
+  bookmarkStar: { paddingHorizontal: 10, paddingVertical: 6 },
+  bookmarkStarText: { fontSize: 20 },
   checkbox: { paddingHorizontal: 10, paddingVertical: 6 },
   checkboxText: { fontSize: 20 },
   categoryBox: {

@@ -108,15 +108,21 @@ export default function NotesTool() {
             <Button title="Cancel" onPress={() => setModalVisible(false)} />
             <Button title="Save" onPress={saveNote} />
           </View>
+
+          <Text style={styles.fieldLabel}>Title</Text>
           <TextInput
             style={styles.titleInput}
-            placeholder="Title"
+            placeholder="Enter a title for your note"
+            placeholderTextColor="#999"
             value={title}
             onChangeText={setTitle}
           />
+
+          <Text style={styles.fieldLabel}>Note</Text>
           <TextInput
             style={styles.bodyInput}
-            placeholder="Write your note..."
+            placeholder="Write your note here..."
+            placeholderTextColor="#999"
             value={body}
             onChangeText={setBody}
             multiline
@@ -152,18 +158,37 @@ const styles = StyleSheet.create({
   deleteText: { fontSize: 18, paddingHorizontal: 10 },
   empty: { textAlign: 'center', marginTop: 40, color: '#999' },
   modalContainer: { flex: 1, backgroundColor: '#FFF' },
+  fieldLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#888',
+    marginHorizontal: 16,
+    marginTop: 10,
+    marginBottom: 4,
+    textTransform: 'uppercase',
+  },
   titleInput: {
     fontSize: 18,
     fontWeight: 'bold',
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingVertical: 10,
+    marginHorizontal: 16,
+    marginBottom: 6,
     color: '#000',
+    borderWidth: 1,
+    borderColor: '#CCC',
+    borderRadius: 8,
   },
   bodyInput: {
     flex: 1,
     fontSize: 15,
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingTop: 10,
+    marginHorizontal: 16,
+    marginBottom: 16,
     color: '#000',
+    borderWidth: 1,
+    borderColor: '#CCC',
+    borderRadius: 8,
   },
 });

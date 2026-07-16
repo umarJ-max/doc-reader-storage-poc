@@ -55,11 +55,24 @@ export default function ScannerTool() {
       </View>
 
       {scanning ? (
-        <CameraView
-          style={styles.camera}
-          barcodeScannerSettings={{ barcodeTypes: barcodeTypes as any }}
-          onBarcodeScanned={handleScan}
-        />
+        <View style={styles.cameraWrapper}>
+          <CameraView
+            style={styles.camera}
+            barcodeScannerSettings={{ barcodeTypes: barcodeTypes as any }}
+            onBarcodeScanned={handleScan}
+          />
+          <View style={styles.overlayContainer} pointerEvents="none">
+            <View style={styles.scanFrame}>
+              <View style={[styles.corner, styles.cornerTL]} />
+              <View style={[styles.corner, styles.cornerTR]} />
+              <View style={[styles.corner, styles.cornerBL]} />
+              <View style={[styles.corner, styles.cornerBR]} />
+            </View>
+            <Text style={styles.hintText}>
+              Point camera at a {isBarcodeMode ? 'barcode' : 'QR code'}
+            </Text>
+          </View>
+        </View>
       ) : (
         <View style={styles.resultBox}>
           <Text style={styles.resultLabel}>Scanned Value:</Text>
@@ -79,6 +92,37 @@ const styles = StyleSheet.create({
   header: { paddingTop: 50, paddingHorizontal: 16, backgroundColor: '#FFF' },
   title: { fontSize: 18, fontWeight: 'bold', marginVertical: 10, color: '#000' },
   camera: { flex: 1 },
+  cameraWrapper: { flex: 1 },
+  overlayContainer: {
+    ...StyleSheet.absoluteFill,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scanFrame: {
+    width: 250,
+    height: 250,
+    position: 'relative',
+  },
+  corner: {
+    position: 'absolute',
+    width: 32,
+    height: 32,
+    borderColor: '#208AEF',
+  },
+  cornerTL: { top: 0, left: 0, borderTopWidth: 5, borderLeftWidth: 5, borderTopLeftRadius: 12 },
+  cornerTR: { top: 0, right: 0, borderTopWidth: 5, borderRightWidth: 5, borderTopRightRadius: 12 },
+  cornerBL: { bottom: 0, left: 0, borderBottomWidth: 5, borderLeftWidth: 5, borderBottomLeftRadius: 12 },
+  cornerBR: { bottom: 0, right: 0, borderBottomWidth: 5, borderRightWidth: 5, borderBottomRightRadius: 12 },
+  hintText: {
+    color: '#FFF',
+    marginTop: 24,
+    fontSize: 14,
+    fontWeight: '600',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
   text: { color: '#000', textAlign: 'center', marginVertical: 16 },
   resultBox: { flex: 1, backgroundColor: '#FFF', padding: 20, justifyContent: 'center' },
   resultLabel: { fontSize: 14, color: '#555', marginBottom: 8 },

@@ -14,6 +14,7 @@ import * as IntentLauncher from 'expo-intent-launcher';
 import { PDFDocument } from 'pdf-lib';
 import * as base64js from 'base64-js';
 import { router } from 'expo-router';
+import ScreenHeader from '../components/screen-header';
 import MediaStoreScanner from '../../modules/media-store-scanner/src/MediaStoreScannerModule';
 
 type FileEntry = { name: string; uri: string; path: string };
@@ -95,8 +96,8 @@ export default function MergePdfTool() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <Button title="< Back" onPress={() => router.back()} />
-      <Text style={styles.title}>Merge PDF</Text>
+      <ScreenHeader title="Merge PDF" />
+      <View style={styles.content}>
       <Text style={styles.subtitle}>Select 2 or more PDFs to combine into one file</Text>
 
       {loading && <ActivityIndicator size="large" style={{ marginTop: 20 }} />}
@@ -121,13 +122,15 @@ export default function MergePdfTool() {
             <Text style={styles.item}>{item.name}</Text>
           </TouchableOpacity>
         )}
-      />
+      />      </View>
+
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingTop: 50, paddingHorizontal: 16, backgroundColor: '#FFFFFF' },
+  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  content: { flex: 1, paddingHorizontal: 16 },
   title: { fontSize: 20, fontWeight: 'bold', marginTop: 10, color: '#000' },
   subtitle: { fontSize: 13, color: '#555', marginBottom: 10 },
   status: { marginVertical: 8, fontWeight: 'bold', color: '#000' },
