@@ -14,10 +14,10 @@ import {
 import * as IntentLauncher from 'expo-intent-launcher';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import ScreenHeader from '../../components/screen-header';
+import ScreenHeader from '../components/screen-header';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import MediaStoreScanner from '../../../modules/media-store-scanner/src/MediaStoreScannerModule';
-import { Colors, getCategoryColor } from '../../constants/app-theme';
+import MediaStoreScanner from '../../modules/media-store-scanner/src/MediaStoreScannerModule';
+import { Colors, getCategoryColor } from '../constants/app-theme';
 
 type FileEntry = { name: string; uri: string; path: string; category: string };
 
