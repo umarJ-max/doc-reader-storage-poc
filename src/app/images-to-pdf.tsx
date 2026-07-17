@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, memo } from 'react';
 import {
   SafeAreaView,
   Button,
@@ -14,8 +14,10 @@ import * as IntentLauncher from 'expo-intent-launcher';
 import { PDFDocument } from 'pdf-lib';
 import * as base64js from 'base64-js';
 import { router } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import ScreenHeader from '../components/screen-header';
 import MediaStoreScanner from '../../modules/media-store-scanner/src/MediaStoreScannerModule';
+import { Colors, getCategoryColor } from '../constants/app-theme';
 
 type FileEntry = { name: string; uri: string; path: string };
 
@@ -34,8 +36,11 @@ export default function ImagesToPdfTool() {
     setLoading(true);
     try {
       const files = await MediaStoreScanner.queryAllFiles();
+      const junkPath = /\/(\.thumbnails|\.thumbnail|thumbnails|\.cache|cache|\.trashed|\.trash|android\/data|android\/obb)\//i;
       const imgs = files
         .filter((f) => /\.(jpg|jpeg|png)$/i.test(f.name))
+        .filter((f) => !f.name.startsWith('.'))
+        .filter((f) => !junkPath.test(f.path))
         .map((f) => ({ name: f.name, uri: f.uri, path: f.path }));
       setImages(imgs);
     } catch (err: any) {
@@ -44,14 +49,14 @@ export default function ImagesToPdfTool() {
     setLoading(false);
   };
 
-  const toggleSelect = (uri: string) => {
+  const toggleSelect = useCallback((uri: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(uri)) next.delete(uri);
       else next.add(uri);
       return next;
     });
-  };
+  }, []);
 
   const convertToPdf = async () => {
     const filesToConvert = images.filter((f) => selected.has(f.uri));
@@ -103,41 +108,80 @@ export default function ImagesToPdfTool() {
       <View style={styles.content}>
       <Text style={styles.subtitle}>Select JPG or PNG images — each becomes one page</Text>
 
-      {loading && <ActivityIndicator size="large" style={{ marginTop: 20 }} />}
+      {loading && <ActivityIndicator size="large" color={Colors.accent} style={{ marginTop: 20 }} />}
       {status ? <Text style={styles.status}>{status}</Text> : null}
 
       {selected.size >= 1 && (
-        <Button
-          title={converting ? 'Converting...' : `Convert ${selected.size} Image(s) to PDF`}
-          onPress={convertToPdf}
-          disabled={converting}
-        />
+        <TouchableOpacity style={[styles.primaryButton, converting && styles.buttonDisabled]} onPress={convertToPdf} disabled={converting}>
+          <Text style={styles.primaryButtonText}>{converting ? 'Converting...' : `Convert ${selected.size} Image(s) to PDF`}</Text>
+        </TouchableOpacity>
       )}
-      {converting && <ActivityIndicator size="large" style={{ marginTop: 10 }} />}
+      {converting && <ActivityIndicator size="large" color={Colors.accent} style={{ marginTop: 10 }} />}
 
       <FlatList
         data={images}
         extraData={selected}
         keyExtractor={(item, i) => i.toString()}
+        ItemSeparatorComponent={() => <View style={styles.divider} />}
         renderItem={({ item }) => (
-          <TouchableOpacity style={styles.fileRow} onPress={() => toggleSelect(item.uri)}>
-            <Text style={styles.checkboxText}>{selected.has(item.uri) ? '☑' : '☐'}</Text>
-            <Text style={styles.item}>{item.name}</Text>
-          </TouchableOpacity>
+          <FileRow item={item} isSelected={selected.has(item.uri)} onToggle={toggleSelect} />
         )}
-      />      </View>
+        initialNumToRender={16}
+        maxToRenderPerBatch={16}
+        windowSize={8}
+        removeClippedSubviews
+      />
+      </View>
 
     </SafeAreaView>
   );
 }
 
+const FileRow = memo(function FileRow({
+  item,
+  isSelected,
+  onToggle,
+}: {
+  item: FileEntry;
+  isSelected: boolean;
+  onToggle: (uri: string) => void;
+}) {
+  return (
+    <TouchableOpacity style={styles.fileRow} onPress={() => onToggle(item.uri)} activeOpacity={0.6}>
+      <Text style={styles.checkboxText}>{isSelected ? '☑' : '☐'}</Text>
+      <View style={[styles.fileTypeIcon, { backgroundColor: getCategoryColor('image') }]}>
+        <Ionicons name="image" size={16} color="#FFF" />
+      </View>
+      <Text style={styles.item} numberOfLines={1}>{item.name}</Text>
+    </TouchableOpacity>
+  );
+});
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  container: { flex: 1, backgroundColor: Colors.background },
   content: { flex: 1, paddingHorizontal: 16 },
-  title: { fontSize: 20, fontWeight: 'bold', marginTop: 10, color: '#000' },
-  subtitle: { fontSize: 13, color: '#555', marginBottom: 10 },
-  status: { marginVertical: 8, fontWeight: 'bold', color: '#000' },
-  fileRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8 },
-  checkboxText: { fontSize: 20, marginRight: 10 },
-  item: { fontSize: 14, color: '#000', flex: 1 },
+  title: { fontSize: 20, fontWeight: 'bold', marginTop: 10, color: Colors.textPrimary },
+  subtitle: { fontSize: 13, color: Colors.textSecondary, marginBottom: 10 },
+  status: { marginVertical: 8, fontWeight: '600', color: Colors.textSecondary },
+  primaryButton: {
+    backgroundColor: Colors.accent,
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  primaryButtonText: { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
+  buttonDisabled: { opacity: 0.5 },
+  fileRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14 },
+  divider: { height: 1, backgroundColor: Colors.border },
+  checkboxText: { fontSize: 20, marginRight: 10, color: Colors.accent },
+  fileTypeIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  item: { fontSize: 15, fontWeight: '500', color: Colors.textPrimary, flex: 1 },
 });

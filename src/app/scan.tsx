@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
-import { SafeAreaView, Text, StyleSheet, Button, View, Alert } from 'react-native';
+import { SafeAreaView, Text, StyleSheet, TouchableOpacity, View, Alert } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
+import ScreenHeader from '../components/screen-header';
+import { Colors } from '../constants/app-theme';
 
 export default function ScannerTool() {
   const { mode } = useLocalSearchParams<{ mode: string }>();
@@ -39,20 +41,21 @@ export default function ScannerTool() {
 
   if (!permission.granted) {
     return (
-      <SafeAreaView style={styles.center}>
-        <Button title="< Back" onPress={() => router.back()} />
-        <Text style={styles.text}>Camera access is needed to scan {isBarcodeMode ? 'barcodes' : 'QR codes'}</Text>
-        <Button title="Grant Camera Access" onPress={requestPermission} />
+      <SafeAreaView style={styles.permissionContainer}>
+        <ScreenHeader title={isBarcodeMode ? 'Scan Barcode' : 'Scan QR Code'} />
+        <View style={styles.center}>
+          <Text style={styles.text}>Camera access is needed to scan {isBarcodeMode ? 'barcodes' : 'QR codes'}</Text>
+          <TouchableOpacity style={styles.primaryButton} onPress={requestPermission}>
+            <Text style={styles.primaryButtonText}>Grant Camera Access</Text>
+          </TouchableOpacity>
+        </View>
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Button title="< Back" onPress={() => router.back()} />
-        <Text style={styles.title}>{isBarcodeMode ? 'Scan Barcode' : 'Scan QR Code'}</Text>
-      </View>
+      <ScreenHeader title={isBarcodeMode ? 'Scan Barcode' : 'Scan QR Code'} />
 
       {scanning ? (
         <View style={styles.cameraWrapper}>
@@ -77,9 +80,13 @@ export default function ScannerTool() {
         <View style={styles.resultBox}>
           <Text style={styles.resultLabel}>Scanned Value:</Text>
           <Text selectable style={styles.resultValue}>{scannedValue}</Text>
-          <Button title="Copy" onPress={copyValue} />
+          <TouchableOpacity style={styles.primaryButton} onPress={copyValue}>
+            <Text style={styles.primaryButtonText}>Copy</Text>
+          </TouchableOpacity>
           <View style={{ height: 10 }} />
-          <Button title="Scan Again" onPress={scanAgain} />
+          <TouchableOpacity style={styles.secondaryButton} onPress={scanAgain}>
+            <Text style={styles.secondaryButtonText}>Scan Again</Text>
+          </TouchableOpacity>
         </View>
       )}
     </SafeAreaView>
@@ -88,9 +95,10 @@ export default function ScannerTool() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20, backgroundColor: '#FFF' },
-  header: { paddingTop: 50, paddingHorizontal: 16, backgroundColor: '#FFF' },
-  title: { fontSize: 18, fontWeight: 'bold', marginVertical: 10, color: '#000' },
+  permissionContainer: { flex: 1, backgroundColor: Colors.background },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20, backgroundColor: Colors.background },
+  header: { paddingTop: 50, paddingHorizontal: 16, backgroundColor: Colors.background },
+  title: { fontSize: 18, fontWeight: 'bold', marginVertical: 10, color: Colors.textPrimary },
   camera: { flex: 1 },
   cameraWrapper: { flex: 1 },
   overlayContainer: {
@@ -107,7 +115,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: 32,
     height: 32,
-    borderColor: '#208AEF',
+    borderColor: Colors.accent,
   },
   cornerTL: { top: 0, left: 0, borderTopWidth: 5, borderLeftWidth: 5, borderTopLeftRadius: 12 },
   cornerTR: { top: 0, right: 0, borderTopWidth: 5, borderRightWidth: 5, borderTopRightRadius: 12 },
@@ -123,8 +131,24 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 8,
   },
-  text: { color: '#000', textAlign: 'center', marginVertical: 16 },
-  resultBox: { flex: 1, backgroundColor: '#FFF', padding: 20, justifyContent: 'center' },
-  resultLabel: { fontSize: 14, color: '#555', marginBottom: 8 },
-  resultValue: { fontSize: 16, color: '#000', marginBottom: 20, fontWeight: '600' },
+  text: { color: Colors.textSecondary, textAlign: 'center', marginVertical: 16 },
+  primaryButton: {
+    backgroundColor: Colors.accent,
+    borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    alignItems: 'center',
+  },
+  primaryButtonText: { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
+  secondaryButton: {
+    borderWidth: 1,
+    borderColor: Colors.accent,
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  secondaryButtonText: { color: Colors.accent, fontWeight: '600', fontSize: 14 },
+  resultBox: { flex: 1, backgroundColor: Colors.background, padding: 20, justifyContent: 'center' },
+  resultLabel: { fontSize: 14, color: Colors.textSecondary, marginBottom: 8 },
+  resultValue: { fontSize: 16, color: Colors.textPrimary, marginBottom: 20, fontWeight: '600' },
 });

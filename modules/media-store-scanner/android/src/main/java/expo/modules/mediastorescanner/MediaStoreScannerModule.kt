@@ -149,6 +149,32 @@ class MediaStoreScannerModule : Module() {
         MediaStore.Files.FileColumns.MIME_TYPE
       )
 
+      // Path fragments that only ever contain generated thumbnails, app
+      // caches, or other junk that MediaStore happens to index but that
+      // isn't a real user-visible file.
+      val junkPathFragments = listOf(
+        "/.thumbnails/",
+        "/.thumbnail/",
+        "/thumbnails/",
+        "/.cache/",
+        "/cache/",
+        "/.trashed",
+        "/.trash/",
+        "/android/data/",
+        "/android/obb/",
+        "/androidmedia/",
+        "/.temp/",
+        "/.tmp/"
+      )
+
+      fun isJunk(name: String, path: String, size: Long): Boolean {
+        if (size <= 0L) return true // zero-byte / corrupt entries
+        if (name.startsWith(".")) return true // hidden files
+        val lowerPath = path.lowercase()
+        if (lowerPath.split("/").any { it.startsWith(".") && it.isNotEmpty() }) return true // any hidden folder in the path
+        return junkPathFragments.any { lowerPath.contains(it) }
+      }
+
       val cursor = context.contentResolver.query(collection, projection, null, null, null)
       cursor?.use {
         val idCol = it.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
@@ -163,6 +189,9 @@ class MediaStoreScannerModule : Module() {
           val path = it.getString(dataCol) ?: ""
           val size = it.getLong(sizeCol)
           val mime = it.getString(mimeCol) ?: ""
+
+          if (isJunk(name, path, size)) continue
+
           val contentUri = ContentUris.withAppendedId(collection, id)
 
           results.add(

@@ -1,5 +1,6 @@
 import React from 'react';
 import { SafeAreaView, Text, StyleSheet } from 'react-native';
+import { Colors } from '../../constants/app-theme';
 
 export default function ExploreScreen() {
   return (
@@ -10,6 +11,6 @@ export default function ExploreScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFF' },
-  text: { fontSize: 16, color: '#555' },
+  container: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background },
+  text: { fontSize: 16, color: Colors.textSecondary },
 });

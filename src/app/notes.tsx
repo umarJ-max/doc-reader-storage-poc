@@ -12,6 +12,9 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import ScreenHeader from '../components/screen-header';
+import { Colors } from '../constants/app-theme';
 
 type Note = { id: string; title: string; body: string; updatedAt: number };
 
@@ -79,11 +82,7 @@ export default function NotesTool() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Button title="< Back" onPress={() => router.back()} />
-        <Text style={styles.title}>Notes</Text>
-        <Button title="+ New" onPress={openNew} />
-      </View>
+      <ScreenHeader title="Notes" rightLabel="+ New" onRightPress={openNew} />
 
       <FlatList
         data={notes}
@@ -94,8 +93,8 @@ export default function NotesTool() {
               <Text style={styles.noteTitle}>{item.title || '(untitled)'}</Text>
               <Text style={styles.notePreview} numberOfLines={1}>{item.body}</Text>
             </View>
-            <TouchableOpacity onPress={() => deleteNote(item.id)}>
-              <Text style={styles.deleteText}>🗑</Text>
+            <TouchableOpacity onPress={() => deleteNote(item.id)} style={styles.deleteButton}>
+              <Ionicons name="trash-outline" size={18} color={Colors.textMuted} />
             </TouchableOpacity>
           </TouchableOpacity>
         )}
@@ -105,15 +104,19 @@ export default function NotesTool() {
       <Modal visible={modalVisible} animationType="slide">
         <SafeAreaView style={styles.modalContainer}>
           <View style={styles.header}>
-            <Button title="Cancel" onPress={() => setModalVisible(false)} />
-            <Button title="Save" onPress={saveNote} />
+            <TouchableOpacity onPress={() => setModalVisible(false)}>
+              <Text style={styles.headerActionText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={saveNote}>
+              <Text style={[styles.headerActionText, styles.headerSaveText]}>Save</Text>
+            </TouchableOpacity>
           </View>
 
           <Text style={styles.fieldLabel}>Title</Text>
           <TextInput
             style={styles.titleInput}
             placeholder="Enter a title for your note"
-            placeholderTextColor="#999"
+            placeholderTextColor={Colors.textMuted}
             value={title}
             onChangeText={setTitle}
           />
@@ -122,7 +125,7 @@ export default function NotesTool() {
           <TextInput
             style={styles.bodyInput}
             placeholder="Write your note here..."
-            placeholderTextColor="#999"
+            placeholderTextColor={Colors.textMuted}
             value={body}
             onChangeText={setBody}
             multiline
@@ -135,36 +138,41 @@ export default function NotesTool() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFF' },
+  container: { flex: 1, backgroundColor: Colors.background },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingTop: 50,
     paddingHorizontal: 16,
-    paddingBottom: 10,
+    paddingBottom: 14,
+    backgroundColor: Colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
   },
-  title: { fontSize: 18, fontWeight: 'bold', color: '#000' },
+  headerActionText: { fontSize: 16, color: Colors.textSecondary, fontWeight: '600' },
+  headerSaveText: { color: Colors.accent },
+  title: { fontSize: 18, fontWeight: 'bold', color: Colors.textPrimary },
   noteRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: 14,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#EEE',
+    borderBottomColor: Colors.border,
   },
-  noteTitle: { fontSize: 16, fontWeight: '600', color: '#000' },
-  notePreview: { fontSize: 13, color: '#777', marginTop: 2 },
-  deleteText: { fontSize: 18, paddingHorizontal: 10 },
-  empty: { textAlign: 'center', marginTop: 40, color: '#999' },
-  modalContainer: { flex: 1, backgroundColor: '#FFF' },
+  noteTitle: { fontSize: 16, fontWeight: '600', color: Colors.textPrimary },
+  notePreview: { fontSize: 13, color: Colors.textMuted, marginTop: 3 },
+  deleteButton: { paddingHorizontal: 10, paddingVertical: 6 },
+  empty: { textAlign: 'center', marginTop: 40, color: Colors.textMuted },
+  modalContainer: { flex: 1, backgroundColor: Colors.background },
   fieldLabel: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#888',
+    color: Colors.textMuted,
     marginHorizontal: 16,
-    marginTop: 10,
-    marginBottom: 4,
+    marginTop: 14,
+    marginBottom: 6,
     textTransform: 'uppercase',
   },
   titleInput: {
@@ -174,9 +182,10 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     marginHorizontal: 16,
     marginBottom: 6,
-    color: '#000',
+    color: Colors.textPrimary,
+    backgroundColor: Colors.surface,
     borderWidth: 1,
-    borderColor: '#CCC',
+    borderColor: Colors.border,
     borderRadius: 8,
   },
   bodyInput: {
@@ -186,9 +195,10 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     marginHorizontal: 16,
     marginBottom: 16,
-    color: '#000',
+    color: Colors.textPrimary,
+    backgroundColor: Colors.surface,
     borderWidth: 1,
-    borderColor: '#CCC',
+    borderColor: Colors.border,
     borderRadius: 8,
   },
 });

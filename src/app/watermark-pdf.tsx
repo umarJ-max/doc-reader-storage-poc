@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, memo } from 'react';
 import {
   SafeAreaView,
   Button,
@@ -17,6 +17,7 @@ import * as base64js from 'base64-js';
 import { router } from 'expo-router';
 import ScreenHeader from '../components/screen-header';
 import MediaStoreScanner from '../../modules/media-store-scanner/src/MediaStoreScannerModule';
+import { Colors } from '../constants/app-theme';
 
 type FileEntry = { name: string; uri: string; path: string };
 
@@ -45,6 +46,10 @@ export default function WatermarkPdfTool() {
     }
     setLoading(false);
   };
+
+  const toggleSelect = useCallback((uri: string) => {
+    setSelected((prev) => (prev === uri ? null : uri));
+  }, []);
 
   const applyWatermark = async () => {
     const file = pdfFiles.find((f) => f.uri === selected);
@@ -114,55 +119,82 @@ export default function WatermarkPdfTool() {
         value={watermarkText}
         onChangeText={setWatermarkText}
         placeholder="Watermark text"
+        placeholderTextColor={Colors.textMuted}
       />
 
-      {loading && <ActivityIndicator size="large" style={{ marginTop: 20 }} />}
+      {loading && <ActivityIndicator size="large" color={Colors.accent} style={{ marginTop: 20 }} />}
       {status ? <Text style={styles.status}>{status}</Text> : null}
 
       {selected && (
-        <Button
-          title={processing ? 'Applying...' : 'Apply Watermark'}
-          onPress={applyWatermark}
-          disabled={processing}
-        />
+        <TouchableOpacity style={[styles.primaryButton, processing && styles.buttonDisabled]} onPress={applyWatermark} disabled={processing}>
+          <Text style={styles.primaryButtonText}>{processing ? 'Applying...' : 'Apply Watermark'}</Text>
+        </TouchableOpacity>
       )}
-      {processing && <ActivityIndicator size="large" style={{ marginTop: 10 }} />}
+      {processing && <ActivityIndicator size="large" color={Colors.accent} style={{ marginTop: 10 }} />}
 
       <FlatList
         data={pdfFiles}
         extraData={selected}
         keyExtractor={(item, i) => i.toString()}
+        ItemSeparatorComponent={() => <View style={styles.divider} />}
         renderItem={({ item }) => (
-          <TouchableOpacity
-            style={styles.fileRow}
-            onPress={() => setSelected(selected === item.uri ? null : item.uri)}
-          >
-            <Text style={styles.radioText}>{selected === item.uri ? '🔘' : '⚪'}</Text>
-            <Text style={styles.item}>{item.name}</Text>
-          </TouchableOpacity>
+          <FileRow item={item} isSelected={selected === item.uri} onToggle={toggleSelect} />
         )}
-      />      </View>
+        initialNumToRender={16}
+        maxToRenderPerBatch={16}
+        windowSize={8}
+        removeClippedSubviews
+      />
+      </View>
 
     </SafeAreaView>
   );
 }
 
+const FileRow = memo(function FileRow({
+  item,
+  isSelected,
+  onToggle,
+}: {
+  item: FileEntry;
+  isSelected: boolean;
+  onToggle: (uri: string) => void;
+}) {
+  return (
+    <TouchableOpacity style={styles.fileRow} onPress={() => onToggle(item.uri)} activeOpacity={0.6}>
+      <Text style={styles.radioText}>{isSelected ? '🔘' : '⚪'}</Text>
+      <Text style={styles.item} numberOfLines={1}>{item.name}</Text>
+    </TouchableOpacity>
+  );
+});
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  container: { flex: 1, backgroundColor: Colors.background },
   content: { flex: 1, paddingHorizontal: 16 },
-  title: { fontSize: 20, fontWeight: 'bold', marginTop: 10, color: '#000' },
-  subtitle: { fontSize: 13, color: '#555', marginBottom: 10 },
+  title: { fontSize: 20, fontWeight: 'bold', marginTop: 10, color: Colors.textPrimary },
+  subtitle: { fontSize: 13, color: Colors.textSecondary, marginBottom: 10 },
   input: {
     borderWidth: 1,
-    borderColor: '#CCC',
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
     borderRadius: 8,
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 10,
     marginBottom: 10,
-    color: '#000',
+    color: Colors.textPrimary,
   },
-  status: { marginVertical: 8, fontWeight: 'bold', color: '#000' },
-  fileRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8 },
+  status: { marginVertical: 8, fontWeight: '600', color: Colors.textSecondary },
+  primaryButton: {
+    backgroundColor: Colors.accent,
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  primaryButtonText: { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
+  buttonDisabled: { opacity: 0.5 },
+  fileRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14 },
+  divider: { height: 1, backgroundColor: Colors.border },
   radioText: { fontSize: 18, marginRight: 10 },
-  item: { fontSize: 14, color: '#000', flex: 1 },
+  item: { fontSize: 15, fontWeight: '500', color: Colors.textPrimary, flex: 1 },
 });

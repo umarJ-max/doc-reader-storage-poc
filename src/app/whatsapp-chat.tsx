@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { SafeAreaView, Button, Text, StyleSheet, TextInput, Linking, Alert, View } from 'react-native';
+import { SafeAreaView, Text, StyleSheet, TextInput, Linking, Alert, View, TouchableOpacity } from 'react-native';
 import { router } from 'expo-router';
 import ScreenHeader from '../components/screen-header';
+import { Colors } from '../constants/app-theme';
 
 export default function WhatsAppChatTool() {
   const [phone, setPhone] = useState('');
@@ -29,30 +30,42 @@ export default function WhatsAppChatTool() {
       <TextInput
         style={styles.input}
         placeholder="e.g. 923001234567"
+        placeholderTextColor={Colors.textMuted}
         value={phone}
         onChangeText={setPhone}
         keyboardType="phone-pad"
       />
 
-      <Button title="Open Chat" onPress={openChat} />      </View>
+      <TouchableOpacity style={styles.primaryButton} onPress={openChat}>
+        <Text style={styles.primaryButtonText}>Open Chat</Text>
+      </TouchableOpacity>
+      </View>
 
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  container: { flex: 1, backgroundColor: Colors.background },
   content: { flex: 1, paddingHorizontal: 16 },
-  title: { fontSize: 20, fontWeight: 'bold', marginTop: 10, color: '#000' },
-  subtitle: { fontSize: 13, color: '#555', marginBottom: 16 },
+  title: { fontSize: 20, fontWeight: 'bold', marginTop: 10, color: Colors.textPrimary },
+  subtitle: { fontSize: 13, color: Colors.textSecondary, marginBottom: 16, marginTop: 14 },
   input: {
     borderWidth: 1,
-    borderColor: '#CCC',
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
     borderRadius: 8,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 12,
     marginBottom: 16,
-    color: '#000',
+    color: Colors.textPrimary,
     fontSize: 16,
   },
+  primaryButton: {
+    backgroundColor: Colors.accent,
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  primaryButtonText: { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
 });
